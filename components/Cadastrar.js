@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,10 @@ import {
   Platform,
   Modal,
   FlatList,
+  ActivityIndicator,
 } from "react-native";
+import { listarLivros, adicionarLivro } from "../backend/api/Livros";
+import { criarRegistro } from "../backend/api/Registros";
 
 // No Web não existe módulo nativo, então só importamos o DateTimePicker
 // fora da Web. Isso evita que o bundler quebre tentando resolver o pacote nativo.
@@ -17,17 +20,6 @@ let DateTimePicker = null;
 if (Platform.OS !== "web") {
   DateTimePicker = require("@react-native-community/datetimepicker").default;
 }
-
-const LIVROS_INICIAIS = [
-  "Gênesis", "Êxodo", "Levítico", "Números", "Deuteronômio",
-  "Josué", "Juízes", "Rute", "1 Samuel", "2 Samuel",
-  "1 Reis", "2 Reis", "1 Crônicas", "2 Crônicas", "Esdras",
-  "Neemias", "Ester", "Jó", "Salmos", "Provérbios",
-  "Eclesiastes", "Cantares", "Isaías", "Jeremias", "Lamentações",
-  "Ezequiel", "Daniel", "Oseias", "Joel", "Amós",
-  "Mateus", "Marcos", "Lucas", "João", "Atos",
-  "Romanos", "1 Coríntios", "2 Coríntios", "Gálatas", "Efésios",
-];
 
 const OPCAO_NENHUM = "Nenhum";
 
@@ -38,7 +30,7 @@ function formatarData(date) {
   return `${dia}/${mes}/${ano}`;
 }
 
-// Converte Date -> "yyyy-mm-dd" (formato exigido pelo <input type="date">)
+// Converte Date -> "yyyy-mm-dd" (formato exigido pelo <input type="date"> e pelo Postgres)
 function dateParaInputValue(date) {
   const ano = date.getFullYear();
   const mes = String(date.getMonth() + 1).padStart(2, "0");
@@ -48,14 +40,32 @@ function dateParaInputValue(date) {
 
 export default function Cadastrar({ onSave }) {
   const [nome, setNome] = useState("");
-  const [livro, setLivro] = useState("");
+  const [livro, setLivro] = useState(""); // guarda o objeto { id, nome } selecionado
   const [dataLimite, setDataLimite] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
   const [showLivroModal, setShowLivroModal] = useState(false);
 
-  const [livros, setLivros] = useState(LIVROS_INICIAIS);
+  const [livros, setLivros] = useState([]);
+  const [carregandoLivros, setCarregandoLivros] = useState(true);
   const [showAddLivroModal, setShowAddLivroModal] = useState(false);
   const [novoLivro, setNovoLivro] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const carregarLivros = useCallback(async () => {
+    try {
+      setCarregandoLivros(true);
+      const dados = await listarLivros();
+      setLivros(dados);
+    } catch (err) {
+      Alert.alert("Erro", "Não foi possível carregar a lista de livros: " + err.message);
+    } finally {
+      setCarregandoLivros(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregarLivros();
+  }, [carregarLivros]);
 
   function handleChangeDate(event, selectedDate) {
     setShowPicker(Platform.OS === "ios");
@@ -75,7 +85,7 @@ export default function Cadastrar({ onSave }) {
     setDataLimite(new Date(ano, mes - 1, dia));
   }
 
-  function handleAdicionarLivro() {
+  async function handleAdicionarLivro() {
     const nomeFormatado = novoLivro.trim();
 
     if (!nomeFormatado) {
@@ -85,19 +95,24 @@ export default function Cadastrar({ onSave }) {
 
     if (
       nomeFormatado.toLowerCase() === OPCAO_NENHUM.toLowerCase() ||
-      livros.some((l) => l.toLowerCase() === nomeFormatado.toLowerCase())
+      livros.some((l) => l.nome.toLowerCase() === nomeFormatado.toLowerCase())
     ) {
       Alert.alert("Atenção", "Esse livro já existe na lista.");
       return;
     }
 
-    setLivros((prev) => [...prev, nomeFormatado]);
-    setLivro(nomeFormatado);
-    setNovoLivro("");
-    setShowAddLivroModal(false);
+    try {
+      const novo = await adicionarLivro(nomeFormatado);
+      setLivros((prev) => [...prev, novo].sort((a, b) => a.nome.localeCompare(b.nome)));
+      setLivro(novo);
+      setNovoLivro("");
+      setShowAddLivroModal(false);
+    } catch (err) {
+      Alert.alert("Erro", err.message || "Não foi possível adicionar o livro.");
+    }
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!nome.trim() || !livro || livro === OPCAO_NENHUM || !dataLimite) {
       Alert.alert(
         "Atenção",
@@ -106,21 +121,28 @@ export default function Cadastrar({ onSave }) {
       return;
     }
 
-    const novoRegistro = {
-      id: Date.now().toString(),
-      nome: nome.trim(),
-      livro,
-      dataLimite: formatarData(dataLimite),
-      dataLimiteRaw: dataLimite.toISOString(),
-    };
+    try {
+      setSalvando(true);
 
-    onSave?.(novoRegistro);
+      const registroSalvo = await criarRegistro({
+        nomePessoa: nome.trim(),
+        livroId: livro.id,
+        livroNome: livro.nome,
+        dataLimite: dateParaInputValue(dataLimite),
+      });
 
-    setNome("");
-    setLivro("");
-    setDataLimite(null);
+      onSave?.(registroSalvo);
 
-    Alert.alert("Sucesso", "Registro cadastrado com sucesso!");
+      setNome("");
+      setLivro("");
+      setDataLimite(null);
+
+      Alert.alert("Sucesso", "Registro cadastrado com sucesso!");
+    } catch (err) {
+      Alert.alert("Erro", "Não foi possível salvar o registro: " + err.message);
+    } finally {
+      setSalvando(false);
+    }
   }
 
   return (
@@ -145,7 +167,7 @@ export default function Cadastrar({ onSave }) {
             {livro
               ? livro === OPCAO_NENHUM
                 ? "— Nenhum livro —"
-                : `📖 ${livro}`
+                : `📖 ${livro.nome}`
               : "Selecione o livro"}
           </Text>
         </TouchableOpacity>
@@ -193,8 +215,17 @@ export default function Cadastrar({ onSave }) {
         </>
       )}
 
-      <TouchableOpacity style={styles.saveButton} activeOpacity={0.75} onPress={handleSave}>
-        <Text style={styles.saveButtonText}>Salvar</Text>
+      <TouchableOpacity
+        style={[styles.saveButton, salvando && styles.saveButtonDisabled]}
+        activeOpacity={0.75}
+        onPress={handleSave}
+        disabled={salvando}
+      >
+        {salvando ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.saveButtonText}>Salvar</Text>
+        )}
       </TouchableOpacity>
 
       {/* Modal de seleção de livro */}
@@ -208,38 +239,44 @@ export default function Cadastrar({ onSave }) {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Livros</Text>
 
-            <FlatList
-              data={[OPCAO_NENHUM, ...livros]}
-              keyExtractor={(item) => item}
-              contentContainerStyle={{ paddingBottom: 16 }}
-              renderItem={({ item }) => {
-                const isNenhum = item === OPCAO_NENHUM;
-                return (
-                  <TouchableOpacity
-                    style={[
-                      styles.livroOption,
-                      isNenhum && styles.livroOptionNenhum,
-                      livro === item && styles.livroOptionSelected,
-                    ]}
-                    activeOpacity={0.75}
-                    onPress={() => {
-                      setLivro(item);
-                      setShowLivroModal(false);
-                    }}
-                  >
-                    <Text
+            {carregandoLivros ? (
+              <ActivityIndicator color="#fff" style={{ marginVertical: 20 }} />
+            ) : (
+              <FlatList
+                data={[OPCAO_NENHUM, ...livros]}
+                keyExtractor={(item) => (item === OPCAO_NENHUM ? OPCAO_NENHUM : item.id)}
+                contentContainerStyle={{ paddingBottom: 16 }}
+                renderItem={({ item }) => {
+                  const isNenhum = item === OPCAO_NENHUM;
+                  const selecionado = !isNenhum && livro?.id === item.id;
+                  const nenhumSelecionado = isNenhum && livro === OPCAO_NENHUM;
+                  return (
+                    <TouchableOpacity
                       style={[
-                        styles.livroOptionText,
-                        isNenhum && styles.livroOptionTextNenhum,
-                        livro === item && styles.livroOptionTextSelected,
+                        styles.livroOption,
+                        isNenhum && styles.livroOptionNenhum,
+                        (selecionado || nenhumSelecionado) && styles.livroOptionSelected,
                       ]}
+                      activeOpacity={0.75}
+                      onPress={() => {
+                        setLivro(isNenhum ? OPCAO_NENHUM : item);
+                        setShowLivroModal(false);
+                      }}
                     >
-                      {isNenhum ? "— Nenhum —" : item}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              }}
-            />
+                      <Text
+                        style={[
+                          styles.livroOptionText,
+                          isNenhum && styles.livroOptionTextNenhum,
+                          (selecionado || nenhumSelecionado) && styles.livroOptionTextSelected,
+                        ]}
+                      >
+                        {isNenhum ? "— Nenhum —" : item.nome}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            )}
 
             <TouchableOpacity
               style={styles.modalCloseButton}
@@ -379,6 +416,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
     marginTop: 8,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
   },
   saveButtonText: {
     color: "#ffffff",
