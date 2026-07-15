@@ -41,6 +41,18 @@ export async function listarPendentes() {
   return data;
 }
 
+// Conta quantos empréstimos de um livro ainda estão ativos (não devolvidos)
+export async function contarEmprestimosAtivos(livroId) {
+  const { count, error } = await supabase
+    .from("registros")
+    .select("*", { count: "exact", head: true })
+    .eq("livro_id", livroId)
+    .eq("devolvido", false);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
 // Marca um registro como devolvido (com data de hoje)
 export async function marcarComoDevolvido(id) {
   const hoje = new Date().toISOString().split("T")[0];

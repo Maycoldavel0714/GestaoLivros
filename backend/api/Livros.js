@@ -12,20 +12,13 @@ export async function listarLivros() {
 }
 
 // Adiciona um novo livro à lista
-export async function adicionarLivro(nome) {
+export async function adicionarLivro(nome, quantidade) {
   const { data, error } = await supabase
     .from("livros")
-    .insert({ nome })
+    .insert([{ nome, quantidade }])   // <- precisa ter quantidade aqui
     .select()
     .single();
 
-  if (error) {
-    // Código 23505 = violação de unicidade (livro já existe)
-    if (error.code === "23505") {
-      throw new Error("Esse livro já existe na lista.");
-    }
-    throw error;
-  }
-
+  if (error) throw new Error(error.message);
   return data;
 }

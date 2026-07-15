@@ -15,13 +15,26 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "package": "com.maycol211.gestaoLivros"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "@react-native-community/datetimepicker"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d8dd7f42-1b60-470f-a230-810a91b16239"
+      }
+    },
+    "owner": "maycol211",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d8dd7f42-1b60-470f-a230-810a91b16239"
+    }
   }
 }

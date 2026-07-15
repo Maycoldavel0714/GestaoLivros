@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { listarLivros, adicionarLivro } from "../backend/api/Livros";
-import { criarRegistro } from "../backend/api/Registros";
+import { criarRegistro, contarEmprestimosAtivos } from "../backend/api/Registros";
 
 // No Web não existe módulo nativo, então só importamos o DateTimePicker
 // fora da Web. Isso evita que o bundler quebre tentando resolver o pacote nativo.
@@ -40,7 +40,7 @@ function dateParaInputValue(date) {
 
 export default function Cadastrar({ onSave }) {
   const [nome, setNome] = useState("");
-  const [livro, setLivro] = useState(""); // guarda o objeto { id, nome } selecionado
+  const [livro, setLivro] = useState(""); // guarda o objeto { id, nome, quantidade } selecionado
   const [dataLimite, setDataLimite] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
   const [showLivroModal, setShowLivroModal] = useState(false);
@@ -49,6 +49,7 @@ export default function Cadastrar({ onSave }) {
   const [carregandoLivros, setCarregandoLivros] = useState(true);
   const [showAddLivroModal, setShowAddLivroModal] = useState(false);
   const [novoLivro, setNovoLivro] = useState("");
+  const [novaQuantidade, setNovaQuantidade] = useState("");
   const [salvando, setSalvando] = useState(false);
 
   const carregarLivros = useCallback(async () => {
@@ -87,9 +88,15 @@ export default function Cadastrar({ onSave }) {
 
   async function handleAdicionarLivro() {
     const nomeFormatado = novoLivro.trim();
+    const quantidadeFormatada = parseInt(novaQuantidade, 10);
 
     if (!nomeFormatado) {
       Alert.alert("Atenção", "Digite o nome do livro.");
+      return;
+    }
+
+    if (!novaQuantidade || Number.isNaN(quantidadeFormatada) || quantidadeFormatada < 0) {
+      Alert.alert("Atenção", "Digite uma quantidade válida.");
       return;
     }
 
@@ -102,10 +109,11 @@ export default function Cadastrar({ onSave }) {
     }
 
     try {
-      const novo = await adicionarLivro(nomeFormatado);
+      const novo = await adicionarLivro(nomeFormatado, quantidadeFormatada);
       setLivros((prev) => [...prev, novo].sort((a, b) => a.nome.localeCompare(b.nome)));
       setLivro(novo);
       setNovoLivro("");
+      setNovaQuantidade("");
       setShowAddLivroModal(false);
     } catch (err) {
       Alert.alert("Erro", err.message || "Não foi possível adicionar o livro.");
@@ -123,6 +131,19 @@ export default function Cadastrar({ onSave }) {
 
     try {
       setSalvando(true);
+
+      // Verifica se ainda há exemplares disponíveis (quantidade - empréstimos ativos)
+      if (livro !== OPCAO_NENHUM) {
+        const emprestimosAtivos = await contarEmprestimosAtivos(livro.id);
+        if (emprestimosAtivos >= (livro.quantidade ?? 0)) {
+          Alert.alert(
+            "Sem exemplares disponíveis",
+            `Todos os ${livro.quantidade ?? 0} exemplares de "${livro.nome}" já estão emprestados.`
+          );
+          setSalvando(false);
+          return;
+        }
+      }
 
       const registroSalvo = await criarRegistro({
         nomePessoa: nome.trim(),
@@ -167,7 +188,7 @@ export default function Cadastrar({ onSave }) {
             {livro
               ? livro === OPCAO_NENHUM
                 ? "— Nenhum livro —"
-                : `📖 ${livro.nome}`
+                : `📖 ${livro.nome} (${livro.quantidade ?? 0})`
               : "Selecione o livro"}
           </Text>
         </TouchableOpacity>
@@ -270,7 +291,7 @@ export default function Cadastrar({ onSave }) {
                           (selecionado || nenhumSelecionado) && styles.livroOptionTextSelected,
                         ]}
                       >
-                        {isNenhum ? "— Nenhum —" : item.nome}
+                        {isNenhum ? "— Nenhum —" : `${item.nome} (${item.quantidade ?? 0})`}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -309,12 +330,22 @@ export default function Cadastrar({ onSave }) {
               autoFocus
             />
 
+            <TextInput
+              style={styles.input}
+              placeholder="Quantidade"
+              placeholderTextColor="#777"
+              value={novaQuantidade}
+              onChangeText={(texto) => setNovaQuantidade(texto.replace(/[^0-9]/g, ""))}
+              keyboardType="numeric"
+            />
+
             <View style={styles.addModalButtonsRow}>
               <TouchableOpacity
                 style={[styles.addModalButton, styles.addModalButtonCancel]}
                 activeOpacity={0.75}
                 onPress={() => {
                   setNovoLivro("");
+                  setNovaQuantidade("");
                   setShowAddLivroModal(false);
                 }}
               >
